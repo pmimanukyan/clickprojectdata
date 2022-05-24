@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <Columns/ColumnVector.h>
 #include <Parsers/ASTIdentifier.h>
-
 namespace DB
 {
 namespace ErrorCodes
@@ -113,13 +112,19 @@ public:
                 + ", must be array of destination values to transform to.", ErrorCodes::ILLEGAL_TYPE_OF_ARGUMENT};
 
         const DataTypePtr & type_arr_to_nested = type_arr_to->getNestedType();
-        // Names key_names = {"from_copy"};
         Names key_names_left = {"x"};
         Names key_names_right = {"from_"};
         table_join = std::make_shared<TableJoin>(SizeLimits{}, false, ASTTableJoin::Kind::Left, ASTTableJoin::Strictness::Any, key_names_left, key_names_right);
         Block right_sample_block;
         right_sample_block.insert(ColumnWithTypeAndName(type_x->createColumn(), type_x, "from_"));
         right_sample_block.insert(ColumnWithTypeAndName(type_arr_to_nested->createColumn(), type_arr_to_nested, "to_"));
+        // std::cerr << "right_sample block : ";
+        // for (auto& i : right_sample_block.getColumns()) {
+        //     for (size_t j = 0; j < i->size(); ++j) {
+        //         std::cerr << i->get64(j) << ' ';
+        //     }
+        //     std::cerr << '\n';
+        // }
         // right_sample_block.insert(ColumnWithTypeAndName(type_x->createColumn(), type_x, "from_copy"));
         // возможно это нужно ^
         hash_join = std::make_shared<HashJoin>(table_join, right_sample_block);  // segfault (+)
@@ -199,7 +204,7 @@ public:
         hash_join->joinBlock(left_block, extra_block_unused); // segfault (+)
 
         std::cerr << "left block columns: ";
-        
+
         for (auto &column_ : left_block.getColumns()) {
             for (size_t i = 0; i < column_->size(); ++i) {
                 std::cerr << column_->get64(i) << ' ';
@@ -207,17 +212,17 @@ public:
             std::cerr << '\n';
         }
         std::cerr << '\n';
-
-        for (auto &name : left_block.getNames()) {
-            std::cerr << name << ' ';
+        std::cerr << "my_name ";
+        for (auto &my_name : left_block.getNames()) {
+            std::cerr << my_name << ' ';
         }
         std::cerr << '\n';
-        
+
         const ColumnWithTypeAndName & value_column = left_block.getByName("to_");
         std::cerr << "cerr: " << value_column.column->dumpStructure() << '\n';
         /// value_column should contain result of transformation
         UNUSED(value_column);
-        
+
         auto column_result = result_type->createColumn();
         auto * out = column_result.get();
 
@@ -1140,17 +1145,28 @@ private:
             return;
 
         {
+            // TODO: add mutex
             // DataTypePtr from_type = assert_cast<const DataTypeArray *>(arguments[1].type.get())->getNestedType();
             // DataTypePtr to_type = assert_cast<const DataTypeArray *>(arguments[2].type.get())->getNestedType();
-            
-            const IDataType * from_type = arguments[1].type.get();
-            const auto * from_array_type = typeid_cast<const DataTypeArray *>(from_type);
-            const auto & from_nested_type = from_array_type->getNestedType();
-            MutableColumnPtr from_nested_column = from_nested_type->createColumn();
-            for (size_t i = 0; i < from.size(); ++i) {
+
+            //const IDataType * from_type = arguments[1].type.get();
+            //const auto * from_array_type = typeid_cast<const DataTypeArray *>(from_type);
+            //const auto & from_nested_type = from_array_type->getNestedType();
+            // auto common_type = getLeastSupertype(arguments[0].type, from_nested_type) ? not common
+
+            MutableColumnPtr from_nested_column = arguments[0].type->createColumn();
+
+            /// from_nested_type DataTypeNumber<T> DataTypeNumber<UInt32>
+            /// from_nested_type.canBeUsedBoolContext()
+            // from[i]: field
+
+
+            for (size_t i = 0; i < from.size(); ++i)
+            {
+                /// TODO: skip value if it's impossible to cast
                 from_nested_column->insert(from[i]);
             }
-            
+
             // std::cerr << "cerr: initialize from: ";
             // for (size_t i = 0; i < from_nested_column->size(); ++i) {
             //     std::cerr << from_nested_column->get64(i) << ' ';
@@ -1161,6 +1177,7 @@ private:
             const IDataType * to_type = arguments[2].type.get();
             const auto * to_array_type = typeid_cast<const DataTypeArray *>(to_type);
             const auto & to_nested_type = to_array_type->getNestedType();
+
             MutableColumnPtr to_nested_column = to_nested_type->createColumn();
             for (size_t i = 0; i < from.size(); ++i) {
                 to_nested_column->insert(to[i]);
@@ -1171,9 +1188,12 @@ private:
             // }
             // std::cerr << '\n';
             Block right_block;
-            right_block.insert(ColumnWithTypeAndName(std::move(from_nested_column), from_nested_type, "from_"));
+            right_block.insert(ColumnWithTypeAndName(std::move(from_nested_column), arguments[0].type, "from_"));
             right_block.insert(ColumnWithTypeAndName(std::move(to_nested_column), to_nested_type, "to_"));
-            std::cerr << "right_block: ";
+            std::cerr << "right_block: " << right_block.dumpStructure() << '\n';
+            std::cerr << "arg[0]: " << arguments[0].dumpStructure() << '\n';
+            std::cerr << "right_block data: " ;
+
             for (auto &column_ : right_block.getColumns()) {
                 for (size_t i = 0; i < column_->size(); ++i) {
                     std::cerr << column_->get64(i) << ' ';
