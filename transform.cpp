@@ -116,16 +116,11 @@ public:
         Names key_names_left = {"x"};
         Names key_names_right = {"from_"};
         table_join = std::make_shared<TableJoin>(SizeLimits{}, false, ASTTableJoin::Kind::Left, ASTTableJoin::Strictness::Any, key_names_left, key_names_right);
-        // ASTPtr x_ptr = std::make_shared<ASTIdentifier>("x")->clone();
-        // ASTPtr y_ptr = std::make_shared<ASTIdentifier>("from_")->clone();
-        // table_join->addOnKeys(x_ptr, y_ptr);
-        //table_join->add
         Block right_sample_block;
         right_sample_block.insert(ColumnWithTypeAndName(type_x->createColumn(), type_x, "from_"));
         right_sample_block.insert(ColumnWithTypeAndName(type_arr_to_nested->createColumn(), type_arr_to_nested, "to_"));
         // right_sample_block.insert(ColumnWithTypeAndName(type_x->createColumn(), type_x, "from_copy"));
         // возможно это нужно ^
-        std::cout << "\n\n\n IN GET RETURN TYPE IMPL \n\n\n";
         hash_join = std::make_shared<HashJoin>(table_join, right_sample_block);  // segfault (+)
 
         if (args_size == 3)
@@ -180,8 +175,13 @@ public:
 
         initialize(array_from->getValue<Array>(), array_to->getValue<Array>(), arguments);
 
+        ColumnPtr in_ptr = arguments.front().column;
         const auto * in = arguments.front().column.get();
-
+        // std::cerr << "\n\n\n\n\n\n\ncerr: in_ptr:";
+        // for (size_t i = 0; i < in_ptr->size(); ++i) {
+        //     std::cerr << in_ptr->get64(i) << ' ';
+        // }
+        // std::cerr << "\n\n\n\n\n\n\n\n";
         if (isColumnConst(*in))
             return executeConst(arguments, result_type, input_rows_count);
 
@@ -191,15 +191,32 @@ public:
 
         Block left_block;
         left_block.insert(ColumnWithTypeAndName(arguments.front().column, arguments.front().type, "x"));
+
         ExtraBlockPtr extra_block_unused;
         // extra_block_unused.reset(); возможно нужно
 
-        std::cout << "\n\n\n IN EXECUTE IMPL! \n\n\n";
         hash_join->joinBlock(left_block, extra_block_unused); // segfault (+)
+
+        std::cerr << "left block columns: ";
+        
+        for (auto &column_ : left_block.getColumns()) {
+            for (size_t i = 0; i < column_->size(); ++i) {
+                std::cerr << column_->get64(i) << ' ';
+            }
+            std::cerr << '\n';
+        }
+        std::cerr << '\n';
+
+        for (auto &name : left_block.getNames()) {
+            std::cerr << name << ' ';
+        }
+        std::cerr << '\n';
+        
         const ColumnWithTypeAndName & value_column = left_block.getByName("to_");
+        std::cerr << "cerr: " << value_column.column->dumpStructure() << '\n';
         /// value_column should contain result of transformation
         UNUSED(value_column);
-
+        
         auto column_result = result_type->createColumn();
         auto * out = column_result.get();
 
@@ -219,9 +236,9 @@ public:
         {
             throw Exception{"Illegal column " + in->getName() + " of first argument of function " + getName(), ErrorCodes::ILLEGAL_COLUMN};
         }
-
-        UNUSED(column_result);
-        return value_column.column;
+        //UNUSED(column_result);
+        //return value_column.column;
+        return column_result;
     }
 
 private:
@@ -1132,15 +1149,12 @@ private:
             for (size_t i = 0; i < from.size(); ++i) {
                 from_nested_column->insert(from[i]);
             }
-
-            // from_copy
-            // const IDataType * from_type_copy = arguments[1].type.get();
-            // const auto * from_array_type_copy = typeid_cast<const DataTypeArray *>(from_type_copy);
-            // const auto & from_nested_type_copy = from_array_type_copy->getNestedType();
-            // MutableColumnPtr from_nested_column_copy = from_nested_type_copy->createColumn();
-            // for (size_t i = 0; i < from.size(); ++i) {
-            //     from_nested_column_copy->insert(from[i]);
+            
+            // std::cerr << "cerr: initialize from: ";
+            // for (size_t i = 0; i < from_nested_column->size(); ++i) {
+            //     std::cerr << from_nested_column->get64(i) << ' ';
             // }
+            // std::cerr << '\n';
 
 
             const IDataType * to_type = arguments[2].type.get();
@@ -1150,12 +1164,32 @@ private:
             for (size_t i = 0; i < from.size(); ++i) {
                 to_nested_column->insert(to[i]);
             }
-
+            // std::cerr << "cerr: initialize to: ";
+            // for (size_t i = 0; i < to_nested_column->size(); ++i) {
+            //     std::cerr << to_nested_column->get64(i) << ' ';
+            // }
+            // std::cerr << '\n';
             Block right_block;
             right_block.insert(ColumnWithTypeAndName(std::move(from_nested_column), from_nested_type, "from_"));
             right_block.insert(ColumnWithTypeAndName(std::move(to_nested_column), to_nested_type, "to_"));
-            // right_block.insert(ColumnWithTypeAndName(std::move(from_nested_column_copy), from_nested_type, "from_copy"));
+            std::cerr << "right_block: ";
+            for (auto &column_ : right_block.getColumns()) {
+                for (size_t i = 0; i < column_->size(); ++i) {
+                    std::cerr << column_->get64(i) << ' ';
+                }
+                std::cerr << '\n';
+            }
             hash_join->addJoinedBlock(right_block, false);
+            std::cerr << "right block after addJoinedBlock (from hash_join) :";
+            for (auto &block_ : hash_join->getJoinedData()->blocks) {
+                std::cerr << "first: ";
+                for (auto &column_ : block_.getColumns()) {
+                    for (size_t i = 0; i < column_->size(); ++i) {
+                        std::cerr << column_->get64(i) << ' ';
+                    }
+                    std::cerr << '\n';
+                }
+            }
         }
         const size_t size = from.size();
         if (0 == size)
